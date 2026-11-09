@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IoT Network Scanner</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script><!-- prototype only: build Tailwind for production -->
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:['"IBM Plex Sans"','system-ui','sans-serif'],mono:['"IBM Plex Mono"','ui-monospace','monospace']},colors:{ink:'#16202c',field:'#eef1f4',signal:'#0e6b63',crit:'#b3261e',warn:'#a85d00'}}}}</script>
+<style>
+  details>summary{list-style:none;cursor:pointer} details>summary::-webkit-details-marker{display:none}
+  details[open] .chev{transform:rotate(90deg)} .chev{transition:transform .15s}
+  :focus-visible{outline:2px solid #0e6b63;outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body class="bg-field text-ink font-sans antialiased">
+<header class="border-b border-slate-300 bg-white">
+  <div class="mx-auto max-w-5xl px-4 py-4 flex items-baseline justify-between gap-4 flex-wrap">
+    <h1 class="text-xl font-semibold">IoT network scanner</h1>
+    <p class="text-sm text-slate-600">Find smart devices on your network and check them for weak points.</p>
+  </div>
+</header>
+
+<main class="mx-auto max-w-5xl px-4 py-6 space-y-6">
+  <div id="toast" role="alert" class="hidden rounded border border-crit bg-red-50 px-4 py-3 text-sm text-crit"></div>
+
+  <!-- 1. Install -->
+  <section class="rounded border border-slate-300 bg-white p-5" aria-labelledby="h-install">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <h2 id="h-install" class="text-lg font-semibold">1. Install Nmap</h2>
+      <div id="sysStatus" class="text-sm"></div>
+    </div>
+    <div role="tablist" class="mt-3 flex gap-1 border-b border-slate-200" id="osTabs"></div>
+    <ol id="installSteps" class="mt-4 space-y-4 text-sm"></ol>
+    <button id="recheck" class="mt-4 rounded bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">Check installation</button>
+  </section>
+
+  <!-- 2. RoE -->
+  <section class="rounded border border-slate-300 bg-white p-5" aria-labelledby="h-roe">
+    <h2 id="h-roe" class="text-lg font-semibold">2. Confirm you have permission</h2>
+    <p class="mt-1 text-sm text-slate-600">Scanning is locked until you accept every item. Scanning networks you don't own can be illegal.</p>
+    <form id="roeForm" class="mt-4 space-y-3 text-sm">
+      <div id="roeItems" class="space-y-2"></div>
+      <div class="grid gap-3 sm:grid-cols-2">
+        <label class="block">Your name<input id="roeName" autocomplete="name" class="mt-1 w-full rounded border border-slate-300 px-3 py-2"></label>
+        <label class="block">Type <span id="roePhrase" class="font-mono"></span><input id="roePhraseIn" autocomplete="off" class="mt-1 w-full rounded border border-slate-300 px-3 py-2 font-mono"></label>
+      </div>
+      <button id="roeBtn" type="submit" class="rounded bg-signal px-4 py-2 font-medium text-white hover:bg-teal-800">Accept and unlock scanning</button>
+      <span id="roeOk" class="hidden ml-2 text-signal font-medium">Accepted. Scanning is unlocked for 1 hour.</span>
+    </form>
+  </section>
+
+  <!-- 3. Scan -->
+  <section id="scanSection" class="rounded border border-slate-300 bg-white p-5 opacity-50 pointer-events-none" aria-labelledby="h-scan" aria-disabled="true">
+    <h2 id="h-scan" class="text-lg font-semibold">3. Scan your network</h2>
+    <div class="mt-3 flex flex-wrap items-end gap-3 text-sm">
+      <label class="block">Subnet<input id="cidr" class="mt-1 block w-48 rounded border border-slate-300 px-3 py-2 font-mono" placeholder="192.168.1.0/24"></label>
+      <button id="detect" class="rounded border border-slate-400 px-4 py-2 hover:bg-slate-100">Detect my subnet</button>
+      <button id="discover" class="rounded bg-ink px-4 py-2 font-medium text-white hover:bg-slate-700">Find devices</button>
+    </div>
+    <div id="hostsBox" class="mt-5 hidden">
+      <div class="flex items-center justify-between gap-3 flex-wrap text-sm">
+        <p><span id="hostCount" class="font-semibold"></span> devices responded. Pick the ones to scan in depth.</p>
+        <label class="flex items-center gap-2">Ports
+          <select id="profile" class="rounded border border-slate-300 px-2 py-1">
+            <option value="top100">Top 100 (faster)</option>
+            <option value="iot_extended">IoT extended (1883, 554, 5555, more)</option>
+          </select></label>
+      </div>
+      <label class="mt-3 flex items-start gap-2 text-sm"><input id="cve" type="checkbox" checked class="mt-1"><span>Look up known vulnerabilities (CVEs) for each device. This sends detected software versions to vulners.com, so it needs internet and makes the scan slower.</span></label>
+      <div class="mt-2 overflow-x-auto"><table class="w-full text-left text-sm"><thead class="border-b border-slate-300 text-slate-600"><tr>
+        <th class="py-2 pr-2"><input type="checkbox" id="selAll" aria-label="Select all" checked></th><th class="pr-4">IP address</th><th class="pr-4">MAC address</th><th>Vendor</th></tr></thead>
+        <tbody id="hostRows"></tbody></table></div>
+      <button id="scanBtn" class="mt-4 rounded bg-signal px-4 py-2 text-sm font-medium text-white hover:bg-teal-800">Scan selected devices</button>
+    </div>
+    <p id="progress" class="mt-4 hidden text-sm text-slate-600" role="status"></p>
+  </section>
+
+  <!-- 4. Report -->
+  <section id="report" class="hidden" aria-labelledby="h-report">
+    <h2 id="h-report" class="mb-3 text-lg font-semibold">4. Results</h2>
+    <div id="reportBody" class="space-y-4"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); // device banners are untrusted
+let token = sessionStorage.getItem('roe') || null, hosts = [];
+
+// ---- API helper: attaches the RoE token and surfaces server errors ----
+async function api(path, opts = {}) {
+  const r = await fetch(path, {...opts, headers: {'Content-Type':'application/json', ...(token ? {'X-RoE-Token': token} : {})}});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { if (data.code === 'roe') lock(); throw Object.assign(new Error(data.detail || 'Request failed'), {code: data.code}); }
+  return data;
+}
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); t.scrollIntoView({behavior:'smooth', block:'nearest'}); }
+const clearToast = () => $('toast').classList.add('hidden');
+const guard = fn => async (...a) => { clearToast(); try { await fn(...a); } catch (e) { toast(e.message); $('progress').classList.add('hidden'); } };
+
+// ---- 1. Install guide ----
+const GUIDE = {
+  Windows: [
+    ['Install Nmap with Npcap', 'Run this in PowerShell, or download the installer from nmap.org/download. Keep "Install Npcap" ticked, because scans need it.', 'winget install Insecure.Nmap'],
+    ['Check it works', 'Open a new terminal and run:', 'nmap --version'],
+    ['Start this app as Administrator', 'Right-click PowerShell, choose Run as administrator, then:', 'python -m uvicorn app.main:app --port 8000'],
+  ],
+  macOS: [
+    ['Install Homebrew (skip if you have it)', 'Paste the command from brew.sh into Terminal.', null],
+    ['Install Nmap', '', 'brew install nmap'],
+    ['Start this app with sudo', 'SYN scans and OS detection need root:', 'sudo python3 -m uvicorn app.main:app --port 8000'],
+  ],
+  Linux: [
+    ['Install Nmap (Debian, Ubuntu, Raspberry Pi OS)', '', 'sudo apt update && sudo apt install -y nmap'],
+    ['Check it works', '', 'nmap --version'],
+    ['Start this app with sudo', 'Keep your virtualenv by passing its Python path:', 'sudo "$(which python)" -m uvicorn app.main:app --port 8000'],
+  ],
+};
+const guessOS = () => /Win/.test(navigator.userAgent) ? 'Windows' : /Mac/.test(navigator.userAgent) ? 'macOS' : 'Linux';
+function showOS(os) {
+  $('osTabs').innerHTML = Object.keys(GUIDE).map(k => `<button role="tab" aria-selected="${k===os}" data-os="${k}" class="px-4 py-2 text-sm -mb-px border-b-2 ${k===os?'border-signal font-medium':'border-transparent text-slate-600 hover:text-ink'}">${k}</button>`).join('');
+  $('installSteps').innerHTML = GUIDE[os].map(([t, d, cmd]) => `<li><p class="font-medium">${esc(t)}</p>${d?`<p class="text-slate-600">${esc(d)}</p>`:''}${cmd?`<div class="mt-1 flex items-center gap-2 rounded bg-ink px-3 py-2 font-mono text-xs text-slate-100"><code class="flex-1 overflow-x-auto whitespace-nowrap">${esc(cmd)}</code><button data-copy="${esc(cmd)}" class="shrink-0 rounded border border-slate-500 px-2 py-0.5 hover:bg-slate-700">Copy</button></div>`:''}</li>`).join('');
+}
+$('osTabs').addEventListener('click', e => e.target.dataset.os && showOS(e.target.dataset.os));
+$('installSteps').addEventListener('click', e => { if (e.target.dataset.copy) { navigator.clipboard.writeText(e.target.dataset.copy); e.target.textContent = 'Copied'; setTimeout(() => e.target.textContent = 'Copy', 1500); } });
+async function checkSystem() {
+  const s = await api('/api/system');
+  const ok = s.nmap.installed, priv = s.privileged;
+  $('sysStatus').innerHTML = (ok ? `<span class="text-signal font-medium">Nmap found</span> <span class="text-slate-600">${esc(s.nmap.version||'')}</span>` : `<span class="text-crit font-medium">Nmap not found</span>`)
+    + `<br>` + (priv ? `<span class="text-signal">Running with admin rights</span>` : `<span class="text-warn">Not running as admin/root. Device discovery works, but the in-depth scan needs it.</span>`);
+}
+$('recheck').onclick = guard(checkSystem);
+
+// ---- 2. RoE gate ----
+function lock() { token = null; sessionStorage.removeItem('roe'); $('scanSection').classList.add('opacity-50','pointer-events-none'); $('roeOk').classList.add('hidden'); }
+function unlock() { $('scanSection').classList.remove('opacity-50','pointer-events-none'); $('scanSection').removeAttribute('aria-disabled'); $('roeOk').classList.remove('hidden'); }
+async function loadRoE() {
+  const r = await api('/api/roe');
+  $('roePhrase').textContent = r.phrase;
+  $('roeItems').innerHTML = r.items.map(i => `<label class="flex gap-2"><input type="checkbox" class="mt-1" value="${esc(i.id)}"><span>${esc(i.text)}</span></label>`).join('');
+}
+$('roeForm').onsubmit = e => { e.preventDefault(); guard(async () => {
+  const ack = [...$('roeItems').querySelectorAll('input:checked')].map(i => i.value);
+  const r = await api('/api/roe/accept', {method:'POST', body: JSON.stringify({acknowledged: ack, phrase: $('roePhraseIn').value, name: $('roeName').value})});
+  token = r.token; sessionStorage.setItem('roe', token); unlock();
+})(); };
+
+// ---- 3. Subnet, discovery, scan ----
+async function poll(id, label) {
+  const p = $('progress'); p.classList.remove('hidden'); p.textContent = label;
+  for (;;) {
+    const j = await api('/api/jobs/' + id);
+    if (j.status === 'done') { p.classList.add('hidden'); return j.result; }
+    if (j.status === 'error') throw new Error(j.detail);
+    await new Promise(r => setTimeout(r, 1200));
+  }
+}
+$('detect').onclick = guard(async () => { const s = await api('/api/subnet'); $('cidr').value = s.cidr; });
+$('discover').onclick = guard(async () => {
+  if (!$('cidr').value) await $('detect').onclick();
+  const {job_id} = await api('/api/discover', {method:'POST', body: JSON.stringify({cidr: $('cidr').value})});
+  hosts = (await poll(job_id, 'Looking for devices. This takes up to a minute.')).hosts;
+  $('hostCount').textContent = hosts.length;
+  $('hostRows').innerHTML = hosts.map((h, i) => `<tr class="border-b border-slate-100"><td class="py-2 pr-2"><input type="checkbox" data-i="${i}" checked aria-label="Scan ${esc(h.ip)}"></td><td class="pr-4 font-mono">${esc(h.ip)}</td><td class="pr-4 font-mono">${esc(h.mac||'-')}</td><td>${esc(h.vendor||'Unknown')}</td></tr>`).join('');
+  $('hostsBox').classList.remove('hidden');
+});
+$('selAll').onchange = e => $('hostRows').querySelectorAll('input').forEach(c => c.checked = e.target.checked);
+$('scanBtn').onclick = guard(async () => {
+  const targets = [...$('hostRows').querySelectorAll('input:checked')].map(c => hosts[c.dataset.i].ip);
+  if (!targets.length) throw new Error('Select at least one device.');
+  const {job_id} = await api('/api/scan', {method:'POST', body: JSON.stringify({targets, profile: $('profile').value, cve: $('cve').checked})});
+  render(await poll(job_id, `Scanning ${targets.length} device(s). Expect about 30 to 90 seconds per device.`));
+});
+
+// ---- 4. Report ----
+const SEV = {critical:'bg-red-700 text-white', high:'bg-red-100 text-crit', medium:'bg-amber-100 text-warn', low:'bg-slate-200 text-slate-700'};
+const LIKE = {high:['Likely IoT','bg-teal-100 text-signal'], medium:['Possible IoT','bg-amber-100 text-warn'], low:['Probably not IoT','bg-slate-200 text-slate-700']};
+const badge = (cls, t) => `<span class="rounded px-2 py-0.5 text-xs font-medium ${cls}">${esc(t)}</span>`;
+const finding = f => `<li class="rounded border border-slate-200 p-3"><div class="flex flex-wrap items-center gap-2">${badge(SEV[f.sev], f.sev)}<span class="font-medium">${esc(f.title)}</span>${f.port?`<span class="font-mono text-xs text-slate-600">port ${f.port}</span>`:''}</div><p class="mt-1 text-slate-600">${esc(f.why)}</p>${f.detail?`<p class="mt-1">${esc(f.detail)}</p>`:''}<p class="mt-1"><span class="font-medium">Fix:</span> ${esc(f.fix)}</p></li>`;
+const cvssSev = n => n >= 9 ? 'critical' : n >= 7 ? 'high' : n >= 4 ? 'medium' : 'low';
+function cveTable(cves) {
+  const shown = cves.slice(0, 25);
+  return `<div><p class="font-medium">Known vulnerabilities (${cves.length})</p><div class="mt-1 overflow-x-auto"><table class="w-full text-left text-xs"><thead class="border-b border-slate-300 text-slate-600"><tr><th class="py-1 pr-3">CVE</th><th class="pr-3">Score</th><th class="pr-3">Service</th><th>Exploit known</th></tr></thead><tbody>${shown.map(c => `<tr class="border-b border-slate-100"><td class="py-1 pr-3 font-mono"><a class="text-signal underline" target="_blank" rel="noopener noreferrer" href="https://nvd.nist.gov/vuln/detail/${esc(c.id)}">${esc(c.id)}</a></td><td class="pr-3">${badge(SEV[cvssSev(c.cvss)], c.cvss.toFixed(1))}</td><td class="pr-3">${esc(c.service||'')} <span class="font-mono text-slate-600">:${c.port}</span></td><td>${c.exploit?'<span class="font-medium text-crit">Yes</span>':'No'}</td></tr>`).join('')}</tbody></table></div>${cves.length>shown.length?`<p class="mt-1 text-slate-600">Showing the ${shown.length} highest scores of ${cves.length}.</p>`:''}</div>`;
+}
+function render(r) {
+  const s = r.summary, c = s.counts;
+  const gradeColor = {A:'text-signal',B:'text-signal',C:'text-warn',D:'text-crit',F:'text-crit'}[s.grade];
+  $('reportBody').innerHTML = `
+    <div class="flex flex-wrap items-center gap-6 rounded border border-slate-300 bg-white p-5">
+      <div class="text-center"><div class="text-6xl font-semibold ${gradeColor}">${esc(s.grade)}</div><div class="text-xs text-slate-600">score ${s.score}/100</div></div>
+      <div class="min-w-0 flex-1"><p class="font-medium">${esc(s.grade_text)}</p>
+        <p class="mt-1 text-sm text-slate-600">${s.hosts} devices scanned, ${s.iot_devices} look like IoT. Findings: ${c.critical} critical, ${c.high} high, ${c.medium} medium, ${c.low} low.${s.cve_checked ? ` ${s.cves_total} known vulnerabilities (CVEs) found.` : ''}</p></div>
+    </div>
+    ${r.top_fixes.length ? `<div class="rounded border border-slate-300 bg-white p-5"><h3 class="font-semibold">Top fixes</h3><ul class="mt-2 space-y-2 text-sm">${r.top_fixes.map(f => `<li>${badge(SEV[f.sev], f.sev)} <span class="font-medium">${esc(f.title)}</span> <span class="text-slate-600">on ${f.count} ${f.count===1?'device':'devices'}.</span> ${esc(f.fix)}</li>`).join('')}</ul></div>` : ''}
+    ${r.network_findings.length ? `<ul class="space-y-2 text-sm">${r.network_findings.map(finding).join('')}</ul>` : ''}
+    <div class="rounded border border-slate-300 bg-white"><h3 class="border-b border-slate-200 px-5 py-3 font-semibold">Devices</h3>
+      ${r.hosts.map(h => `<details class="border-b border-slate-100 last:border-0"><summary class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-sm hover:bg-slate-50">
+        <span class="chev text-slate-400">&#9656;</span><span class="w-32 font-mono">${esc(h.ip)}</span><span class="font-medium">${esc(h.type)}</span>
+        ${badge(LIKE[h.iot_likelihood][1], LIKE[h.iot_likelihood][0])}<span class="text-slate-600">${esc(h.vendor||'Unknown vendor')}</span>
+        ${h.cve_count?`<span class="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-crit">${h.cve_count} CVEs</span>`:''}<span class="ml-auto text-slate-600">${h.findings.length} ${h.findings.length===1?'finding':'findings'}</span></summary>
+        <div class="space-y-3 px-5 pb-4 text-sm">
+          <dl class="grid gap-x-6 gap-y-1 sm:grid-cols-2"><div><dt class="inline text-slate-600">MAC: </dt><dd class="inline font-mono">${esc(h.mac||'-')}</dd></div><div><dt class="inline text-slate-600">Hostname: </dt><dd class="inline">${esc(h.hostnames.join(', ')||'-')}</dd></div><div class="sm:col-span-2"><dt class="inline text-slate-600">OS guess: </dt><dd class="inline">${esc(h.os||'Not detected')}${h.os_accuracy?` (${h.os_accuracy}% sure)`:''}</dd></div></dl>
+          ${h.reasons.length?`<div><p class="font-medium">Why it looks like IoT</p><ul class="list-disc pl-5 text-slate-600">${h.reasons.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}
+          <div><p class="font-medium">Open ports</p>${h.ports.length?`<div class="mt-1 flex flex-wrap gap-2">${h.ports.map(p=>`<span class="rounded border border-slate-300 px-2 py-0.5 font-mono text-xs">${p.port}/${esc(p.proto)} ${esc(p.service)}${p.product?' · '+esc(p.product):''}</span>`).join('')}</div>`:'<p class="text-slate-600">None found in the scanned range.</p>'}</div>
+          ${h.cves.length?cveTable(h.cves):''}
+          ${h.findings.length?`<ul class="space-y-2">${h.findings.map(finding).join('')}</ul>`:''}
+        </div></details>`).join('')}
+    </div>
+    <p class="text-xs text-slate-600">${esc(r.note)}</p>`;
+  $('report').classList.remove('hidden'); $('report').scrollIntoView({behavior:'smooth'});
+}
+
+// ---- boot ----
+showOS(guessOS()); loadRoE(); checkSystem().catch(() => {});
+if (token) api('/api/subnet').then(unlock).catch(lock); // restore an unexpired acceptance after reload
+</script>
+</body>
+</html>
